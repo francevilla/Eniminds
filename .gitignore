@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.ssr/
+.agents/skills/
+.claude/skills/
+agent/skills/
+.env
+.env.*
+!.env.example
