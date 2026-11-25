@@ -1,4 +1,4 @@
-import { readFile, writeFile, mkdir, rm } from 'node:fs/promises';
+import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { render } from '../.ssr/entry-server.js';
 import { pages, titles } from '../src/content.js';
@@ -14,5 +14,5 @@ for (const route of routes) {
   const out = route === '/' ? 'dist/index.html' : join('dist', route, 'index.html');
   await mkdir(dirname(out), {recursive:true}); await writeFile(out, html);
 }
-await rm('.ssr', { recursive:true, force:true });
+await writeFile('dist/shell.html', template);
 console.log(`Prerendered ${routes.length} pages.`);

@@ -7,3 +7,4 @@ agent/skills/
 .env
 .env.*
 !.env.example
+.cms-data/

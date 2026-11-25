@@ -1,45 +1,64 @@
-# Eniminds — proposta di rifacimento
+# Eniminds — sito e CMS autogestito
 
-Proposta multipagina per il sito Eniminds, basata sull'analisi pubblica in `ANALISI-SITO-ENIMINDS.md`. Il progetto **non modifica il sito online** e richiede validazione prima della pubblicazione.
+Sito multipagina con un pannello editoriale personalizzato, senza WordPress né servizi CMS esterni. Il sito esistente online non è stato modificato. Il progetto rimane una proposta da approvare prima della pubblicazione.
 
-## Avvio e verifica
+## Avvio in locale
 
-Richiede Node.js 20.19+ oppure 22.12+ e npm.
+Servono Node.js 22.21 o superiore (versione 22) e npm.
 
-```sh
-npm ci
-npm run dev       # anteprima di sviluppo
-npm test          # build e test dei percorsi e dei contenuti
-npm run preview   # anteprima della build
-```
+1. Nella cartella del progetto esegui:
 
-La build crea in `dist/` HTML prerenderizzato per ciascuna pagina nota, metadati per pagina e risorse locali. Pubblicare il contenuto di `dist/` su un hosting statico che serva `index.html` nelle directory. Configurare una vera pagina 404 HTTP per gli URL sconosciuti e verificare eventuali varianti degli URL prima della migrazione; il fallback SPA di Vite non sostituisce una configurazione di produzione.
+   ```sh
+   npm ci
+   cp .env.example .env
+   ```
 
-## Pagine e contenuti
+2. Apri `.env` con un editor e imposta `CMS_USERNAME` e una password personale nel campo `CMS_PASSWORD`. In produzione servono almeno 16 caratteri e una password robusta e unica. Non inviarla in chat e non aggiungere `.env` a Git. Se manca uno dei due valori, il sito funziona ma il pannello resta disabilitato. Per lo sviluppo locale puoi lasciare gli altri valori così come sono.
+3. Avvia sito e server contenuti con:
 
-Sono presenti home, chi siamo, vision e mission, priorità, consulenze, organizzazioni, residenziale, contatti, approfondimenti e una pagina provvisoria per l'URL dell'evento SPS 2026. L'URL dell'articolo segnaposto esistente viene mantenuto con una pagina non indicizzabile. Controllare i contenuti dell'evento e decidere con il cliente se conservare, reindirizzare o rimuovere la pagina e il vecchio articolo.
+   ```sh
+   npm run dev
+   ```
 
-La pagina contatti prepara un'e-mail nel programma di posta dell'utente: **non invia messaggi dal server**. Senza un client di posta configurato il visitatore può scrivere direttamente a `info@eniminds.com`. Un servizio di invio autonomo richiede backend, protezione anti-abuso e verifica della privacy.
+4. Apri l'URL del sito mostrato dal comando e aggiungi `/admin/` al suo indirizzo. Accedi con username e password configurati. Il pannello salva solo sul server che stai usando, non modifica il sito già online.
 
-## WordPress / CMS
+Per verificare il progetto: `npm test`. Per preparare una build: `npm run build`.
 
-La connessione al CMS è **predisposta ma non configurata**. Se si imposta `VITE_WORDPRESS_URL` (vedi `.env.example`) all'URL pubblico di un WordPress di staging, il frontend legge via REST:
+## Come si usa il pannello
 
-- il contenuto delle pagine con gli slug corrispondenti e lo mostra come approfondimento aggiuntivo; l'HTML viene sanitizzato;
-- gli articoli pubblicati nel blog, con link alla pagina dell'articolo sul WordPress configurato. L'articolo segnaposto `titolo-articolo` viene escluso.
+- **Homepage:** modifica i testi principali e l'immagine di apertura.
+- **Servizi, Organizzazioni e Residenziale:** modifica i testi e le immagini delle rispettive sezioni della homepage.
+- **Pagine:** seleziona una pagina e modifica titoli, testi, immagini e schede esistenti.
+- **Dati e contatti:** modifica e-mail, indirizzo, dati societari e presentazione nel footer.
+- **Articoli:** crea una bozza, assegna uno slug univoco (`parole-separate-da-trattini`), completa titolo, data, sommario e testo e seleziona **Pubblicato** quando è pronto. Gli articoli pubblicati compaiono nel blog del nuovo sito. Il testo usa paragrafi semplici: separali con una riga vuota.
+- Le immagini si possono caricare in formato JPG, PNG o WebP, fino a 5 MB. Sono pubblicamente accessibili tramite il loro URL anche prima della pubblicazione delle modifiche, quindi non caricare materiale riservato.
+- Premi **Pubblica modifiche** per salvare tutte le modifiche delle varie sezioni. Se un'altra sessione ha salvato prima, il sistema segnala il conflitto: ricarica e ricontrolla i dati prima di riprovare. Non esiste ancora un salvataggio automatico o una cronologia delle revisioni.
 
-Il browser deve poter accedere all'API WordPress con CORS consentito. L'URL è pubblico, non contiene credenziali e viene incorporato nella build: ricostruire dopo le modifiche. In caso di API non disponibile, le pagine conservano i contenuti locali; il blog mostra un messaggio di errore.
+Il pannello modifica i campi previsti, non è un editor visuale completo: numero e struttura delle schede, navigazione, logo, stile, pagina contatti e alcune etichette restano nel codice. Il modulo contatti apre il programma e-mail del visitatore: non invia direttamente dal server.
 
-**Limiti importanti:** i testi principali, immagini, menu e layout restano nel codice (`src/content.js` e componenti React); questo collegamento non è un CMS completo per modificarli. Anche la home non è ancora gestita dal CMS e gli articoli puntano al WordPress, non a pagine native del nuovo frontend. La redazione CMS viene caricata nel browser dopo l'HTML prerenderizzato, quindi la sua indicizzazione non è garantita. Prima del rilascio occorre definire e implementare il modello editoriale completo, pagine degli articoli, rendering SEO lato build/server e CORS. Non collegare il WordPress di produzione senza accordo e verifica dei suoi contenuti e delle sue integrazioni.
+## Dati e backup
 
-## Prima della pubblicazione
+I contenuti vengono conservati nel file `content.json` della directory `CMS_DATA_DIR`, di default `.cms-data/`. Le immagini caricate sono nella sua sottocartella `media/`. La directory non viene committata. **Prima di aggiornamenti o migrazioni, fai backup completi e periodici dell'intera directory, incluse le immagini**, e prova il ripristino. Se viene persa, si perdono anche modifiche, bozze e immagini caricate. Non usare storage temporaneo o filesystem non persistente.
 
-- Validare testi, servizi, dati aziendali e condizioni normative; non sono state inventate testimonianze o statistiche.
-- Sostituire il marchio tipografico provvisorio con il logo ufficiale e le immagini illustrative generate con AI con materiali approvati. In particolare la foto del team è illustrativa e non ritrae necessariamente il personale Eniminds.
-- Collegare e testare il CMS e l'invio dei contatti. Riesaminare privacy, cookie, analytics e conservazione dei dati con il responsabile competente.
-- Concordare dominio e hosting, SEO/canonical/sitemap, redirect 301, Search Console e verificare l'intero inventario dei vecchi URL; non modificare DNS o sito esistente senza approvazione.
-- Verificare accessibilità, prestazioni, immagini e contenuti definitivi su browser e dispositivi reali.
+Il CMS è progettato per una sola istanza Node.js e una sola password amministratore. Le sessioni sono in memoria, scadono dopo otto ore e si perdono al riavvio. Non sono previsti utenti multipli, recupero password, autenticazione a due fattori o backup automatici. Per cambiare credenziali, modifica `CMS_USERNAME` e `CMS_PASSWORD` nell'ambiente e riavvia il processo. In alternativa a `CMS_PASSWORD` è supportato `CMS_PASSWORD_HASH` (formato `scrypt:salt:hash`); non impostarli entrambi. Le configurazioni contrassegnate `CMS_PREVIEW_ONLY=true` non possono avviarsi in produzione.
+
+## Produzione: requisiti e limiti
+
+Prima di pubblicare, scegliere un server Node.js autogestito con filesystem persistente, HTTPS e reverse proxy. Sul server:
+
+1. Configura `CMS_USERNAME`, una password robusta e segreta `CMS_PASSWORD` (oppure il suo hash `CMS_PASSWORD_HASH`), un percorso persistente e protetto `CMS_DATA_DIR` e `CMS_PUBLIC_ORIGIN` con l'origine HTTPS esatta del sito (per esempio `https://www.esempio.it`, senza percorsi). Non usare `.env.example` come configurazione di produzione.
+2. Esegui `npm ci`, `npm test`, `npm run build` e quindi `npm start`. Il reverse proxy deve servire il sito e `/admin/`, `/api/`, `/media/` sotto la stessa origine HTTPS. Conserva sia `dist/` sia `.ssr/` generati dalla build: il server rende le pagine con i contenuti salvati. `npm run preview` mostra solo la build statica e **non** avvia il CMS.
+3. Proteggi l'accesso amministrativo anche a livello di rete (per esempio con VPN o accesso ristretto); configura firewall, monitoraggio, aggiornamenti e backup verificati. Il pannello ha cookie HttpOnly/SameSite/Secure in produzione, controllo dell'origine e token CSRF, limiti sui tentativi e validazione dei dati, ma **non ha ancora ricevuto un audit di sicurezza indipendente**.
+4. Verifica ripristino backup, accesso, caricamento immagini e pubblicazione in staging prima di esporlo pubblicamente. Non eseguire più istanze contemporaneamente sullo stesso archivio: non esistono blocchi tra processi.
+
+Gli articoli sono renderizzati dal server per i visitatori e i motori di ricerca. Vanno ancora configurati canonical, sitemap, redirect 301, Search Console e gestione completa dei vecchi URL. Le pagine generate staticamente in `dist/` non sono una copia aggiornata dei contenuti del CMS: in produzione serve il server Node, non un hosting esclusivamente statico.
+
+## Prima del lancio
+
+- Validare contenuti, servizi, indirizzi, dati societari e condizioni normative. Sostituire il marchio provvisorio e le immagini generate con AI, inclusa quella del team.
+- Completare e verificare la pagina evento SPS 2026, il form di contatto e le modalità di invio. Valutare privacy, cookie, analytics e sicurezza con i professionisti competenti.
+- Pianificare migrazione, redirect, dominio, hosting e accessi. Non modificare DNS o sito esistente senza approvazione.
 
 ## Skill di progetto
 
-`skills-lock.json` registra le skill installate. Le copie locali in `.agents/skills/`, `.claude/skills/` e `agent/skills/` sono escluse dal repository per evitare di includere migliaia di file di terze parti. Per ripristinarle in un nuovo clone usare `npx skills experimental_install -y` e verificare la compatibilità e la fiducia delle fonti prima dell'uso.
+`skills-lock.json` registra le skill installate. Le copie locali in `.agents/skills/`, `.claude/skills/` e `agent/skills/` sono escluse dal repository. Per ripristinarle in un nuovo clone usare `npx skills experimental_install -y` e verificare le fonti prima dell'uso.
