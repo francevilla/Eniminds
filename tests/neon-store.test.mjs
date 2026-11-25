@@ -1,0 +1,32 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import { PGlite } from '@electric-sql/pglite';
+import { neonStore } from '../server/neon-store.mjs';
+import { revision } from '../server/content-store.mjs';
+
+test('database PostgreSQL: contenuti, conflitti, sessioni e limiti condivisi', async t => {
+  const pg = new PGlite();
+  t.after(()=>pg.close());
+  await pg.exec(await readFile('deploy/schema.sql','utf8'));
+  const sql = async (parts,...values) => (await pg.query(parts.reduce((out,part,i)=>out+part+(i<values.length?`$${i+1}`:''),''),values)).rows;
+  const a=neonStore('',sql), b=neonStore('',sql);
+  const initial=await a.read();
+  assert.equal(revision(initial), revision(JSON.parse(JSON.stringify(initial))));
+  assert.equal(revision({z:1,a:{z:2,a:3}}),revision({a:{a:3,z:2},z:1}));
+  const prev=revision(initial);initial.home.heroTitle='Titolo persistente';
+  assert.equal(await a.write(initial,prev),revision(initial));
+  assert.equal((await b.read()).home.heroTitle,'Titolo persistente');
+  assert.equal(await b.write(initial,prev),null);
+  initial.home.heroImage='https://Example123.public.blob.vercel-storage.com/media/0123456789abcdef0123456789abcdef.png';
+  assert.equal(await a.write(initial,revision(await b.read())),revision(initial));
+  initial.home.heroImage='https://evil.example/media/0123456789abcdef0123456789abcdef.png';
+  await assert.rejects(a.write(initial,revision(await b.read())));
+  const token='a'.repeat(64);
+  await a.createSession(token,'csrf-test');assert.equal((await b.getSession(token)).csrf,'csrf-test');
+  assert.notEqual((await pg.query('SELECT token_hash FROM cms_sessions')).rows[0].token_hash,token);
+  await b.deleteSession(token);assert.equal(await a.getSession(token),null);
+  for(let i=0;i<15;i++) assert.equal(await (i%2 ? a:b).consumeAttempt(),true);
+  assert.equal(await b.consumeAttempt(),false);
+  await a.resetAttempts();assert.equal(await b.consumeAttempt(),true);
+});

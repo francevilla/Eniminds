@@ -12,7 +12,7 @@ function validateLike(value, reference, path='') {
     if (typeof value !== 'string' || value.length > 5000 || (reference.trim() && !value.trim())) throw Error(`Campo non valido: ${path}`);
     if (/\.(slug|number|accent)$/.test(path) || /\.next\.[01]$/.test(path)) { if (value !== reference) throw Error(`Campo non valido: ${path}`); }
     if (path.endsWith('.image') || path.endsWith('.heroImage')) {
-      if (!/^\/(images|media)\/[a-zA-Z0-9._-]+\.(webp|png|jpe?g)$/.test(value)) throw Error(`Immagine non valida: ${path}`);
+      if (!/^\/(images|media)\/[a-zA-Z0-9._-]+\.(webp|png|jpe?g)$/.test(value) && !/^https:\/\/[a-z0-9-]+\.public\.blob\.vercel-storage\.com\/media\/[a-f0-9]{32}\.(webp|png|jpg)$/i.test(value)) throw Error(`Immagine non valida: ${path}`);
     }
     return;
   }
@@ -31,7 +31,12 @@ export function validateContent(content) {
   if(new Set(posts.map(p=>p.slug)).size!==posts.length) throw Error('Slug articolo duplicato');
   return content;
 }
-export function revision(data) { return createHash('sha256').update(JSON.stringify(data)).digest('hex'); }
+function canonical(value) {
+  if (Array.isArray(value)) return value.map(canonical);
+  if (value && typeof value === 'object') return Object.fromEntries(Object.keys(value).sort().map(key => [key, canonical(value[key])]));
+  return value;
+}
+export function revision(data) { return createHash('sha256').update(JSON.stringify(canonical(data))).digest('hex'); }
 export function store(dir) {
   const file=join(dir,'content.json');
   async function read() { try { const data=JSON.parse(await readFile(file,'utf8'));return validateContent(data); } catch (err) { if (err.code==='ENOENT') return structuredClone(defaults); throw err; } }
