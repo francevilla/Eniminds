@@ -3,10 +3,14 @@ import { randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
 import { mkdir, writeFile, readFile } from 'node:fs/promises';
 import { titles, normalizePath } from '../src/content.js';
 import { resolve, join } from 'node:path';
+import { neonStore } from './neon-store.mjs';
+import { put } from '@vercel/blob';
 import { store, revision } from './content-store.mjs';
 
 const app=express(); app.disable('x-powered-by');
-const dir=resolve(process.env.CMS_DATA_DIR || '.cms-data'); const db=store(dir);
+const cloud=process.env.CMS_STORAGE === 'neon';
+if (process.env.VERCEL && !cloud) throw new Error('Su Vercel CMS_STORAGE deve essere neon; storage locale non persistente.');
+const dir=resolve(process.env.CMS_DATA_DIR || '.cms-data'); const db=cloud ? neonStore(process.env.DATABASE_URL) : store(dir);
 const password=process.env.CMS_PASSWORD || ''; const username=process.env.CMS_USERNAME || ''; const passwordHash=process.env.CMS_PASSWORD_HASH || ''; const production=process.env.NODE_ENV === 'production';
 if (username && (!/^[a-zA-Z0-9._-]{1,64}$/.test(username))) { console.error('CMS_USERNAME non valido.'); process.exit(1); }
 if (password && passwordHash) { console.error('Usare CMS_PASSWORD oppure CMS_PASSWORD_HASH, non entrambi.'); process.exit(1); }
@@ -14,7 +18,7 @@ if (production && process.env.CMS_PREVIEW_ONLY === 'true') { console.error('Cred
 if (production && password && password.length < 16) { console.error('CMS_PASSWORD deve contenere almeno 16 caratteri in produzione.'); process.exit(1); }
 if (production && (!username || (!password && !passwordHash))) { console.error('Configurare CMS_USERNAME e una password prima di avviare in produzione.'); process.exit(1); }
 let publicOrigin = '';
-if (production) { try { const u = new URL(process.env.CMS_PUBLIC_ORIGIN); if (u.protocol !== 'https:' || u.pathname !== '/' || u.search || u.hash || u.username || u.password) throw Error(); publicOrigin = u.origin; } catch { console.error('CMS_PUBLIC_ORIGIN deve essere un’origine HTTPS, ad esempio https://cms.example.com'); process.exit(1); } }
+if (production) { try { const previewOrigin = process.env.VERCEL_ENV === 'preview' && process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : ''; const u = new URL(previewOrigin || process.env.CMS_PUBLIC_ORIGIN); if (u.protocol !== 'https:' || u.pathname !== '/' || u.search || u.hash || u.username || u.password) throw Error(); publicOrigin = u.origin; } catch { console.error('CMS_PUBLIC_ORIGIN deve essere un’origine HTTPS, ad esempio https://cms.example.com'); process.exit(1); } }
 let salt, expected;
 if (passwordHash) {
   const match = /^scrypt:([0-9a-f]{64}):([0-9a-f]{64})$/.exec(passwordHash);
@@ -28,24 +32,25 @@ app.use(express.json({limit:'8mb'}));
 const publicContent = content => ({...content,posts:content.posts.filter(p=>p.published)});
 const cookieToken = req => (req.headers.cookie || '').split(';').map(x=>x.trim()).find(x=>x.startsWith('cms_session='))?.slice(12);
 function sameOrigin(req,res,next) { try { const origin=new URL(req.get('origin')); if (production ? origin.origin !== publicOrigin : (origin.host !== req.get('host') || !['http:','https:'].includes(origin.protocol))) throw Error(); next(); } catch { res.status(403).json({error:'Origine non autorizzata'}); } }
-function auth(req,res,next) { const token=cookieToken(req), session=sessions.get(token); if(!session || session.expires<Date.now()) { if(token) sessions.delete(token); return res.status(401).json({error:'Accesso richiesto'}); } req.cmsSession=session; next(); }
+async function auth(req,res,next) { try { const token=cookieToken(req), session=cloud ? await db.getSession(token) : sessions.get(token); if(!session || (!cloud && session.expires<Date.now())) { if(token && !cloud) sessions.delete(token); return res.status(401).json({error:'Accesso richiesto'}); } req.cmsSession=session; next(); } catch(e) { next(e); } }
 function csrf(req,res,next) { if(req.get('x-csrf-token') !== req.cmsSession.csrf) return res.status(403).json({error:'Sessione non valida'}); next(); }
 app.get('/api/content', async (req,res,next)=>{try{res.set('Cache-Control','no-store').json(publicContent(await db.read()))}catch(e){next(e)}});
 app.get('/api/admin/status',(req,res)=>res.json({configured}));
-app.post('/api/admin/login',sameOrigin,(req,res)=>{
-  const now=Date.now(); while(attempts.length && attempts[0]<now-15*60*1000) attempts.shift();
-  if(attempts.length>=15) return res.status(429).json({error:'Troppi tentativi. Riprova più tardi.'}); attempts.push(now);
+app.post('/api/admin/login',sameOrigin,async(req,res,next)=>{ try {
+  const now=Date.now();
+  if (cloud) { if (!await db.consumeAttempt()) return res.status(429).json({error:'Troppi tentativi. Riprova più tardi.'}); }
+  else { while(attempts.length && attempts[0]<now-15*60*1000) attempts.shift(); if(attempts.length>=15) return res.status(429).json({error:'Troppi tentativi. Riprova più tardi.'}); attempts.push(now); }
   const supplied=typeof req.body?.password==='string' && req.body.password.length<=512?req.body.password:'';
   const suppliedUsername=typeof req.body?.username==='string' && req.body.username.length<=64?req.body.username:'';
   const candidate=scryptSync(supplied,salt,32); if(!configured || suppliedUsername!==username || !timingSafeEqual(candidate,expected)) return res.status(401).json({error:'Accesso non riuscito'});
-  attempts.length=0;const token=randomBytes(32).toString('hex'), csrfToken=randomBytes(32).toString('hex');sessions.set(token,{csrf:csrfToken,expires:now+8*60*60*1000});
+  const token=randomBytes(32).toString('hex'), csrfToken=randomBytes(32).toString('hex'); if (cloud) { await db.createSession(token,csrfToken); await db.resetAttempts(); } else { attempts.length=0; sessions.set(token,{csrf:csrfToken,expires:now+8*60*60*1000}); }
   res.cookie('cms_session',token,{httpOnly:true,sameSite:'strict',secure:production,path:'/api/admin',maxAge:8*60*60*1000});res.set('Cache-Control','no-store').json({csrf:csrfToken});
-});
+} catch(e) { next(e); } });
 app.get('/api/admin/content',auth,async(req,res,next)=>{try{const data=await db.read();res.set('Cache-Control','no-store').json({data,revision:revision(data),csrf:req.cmsSession.csrf});}catch(e){next(e)}});
 let writing=false;
-app.put('/api/admin/content',sameOrigin,auth,csrf,async(req,res,next)=>{if(writing)return res.status(409).json({error:'Salvataggio in corso, riprova.'});writing=true;try{let old=await db.read();if(req.body?.revision!==revision(old))return res.status(409).json({error:'I contenuti sono stati modificati da un’altra sessione. Ricarica prima di salvare.'});await db.write(req.body.data);res.json({revision:revision(req.body.data)});}catch(e){if(e instanceof SyntaxError || e.name==='ZodError' || e.message.startsWith('Campo') || e.message.startsWith('Oggetto') || e.message.startsWith('Elenco') || e.message.startsWith('Immagine') || e.message.startsWith('Struttura') || e.message.startsWith('Slug')) return res.status(400).json({error:'Contenuto non valido: '+e.message});next(e);}finally{writing=false;}});
-app.post('/api/admin/logout',sameOrigin,auth,csrf,(req,res)=>{sessions.delete(cookieToken(req));res.clearCookie('cms_session',{path:'/api/admin',httpOnly:true,sameSite:'strict',secure:production});res.json({ok:true});});
-app.post('/api/admin/upload',sameOrigin,auth,csrf,async(req,res,next)=>{try{const {data,type}=req.body || {}; if(typeof data!=='string'||!['image/png','image/jpeg','image/webp'].includes(type)||data.length>7_000_000 || !/^[A-Za-z0-9+/]*={0,2}$/.test(data))return res.status(400).json({error:'File non valido'});const b=Buffer.from(data,'base64');if(b.length>5_000_000 || b.length<16)return res.status(400).json({error:'La dimensione massima è 5 MB'});const valid=type==='image/png'?b.subarray(0,8).equals(Buffer.from('89504e470d0a1a0a','hex')):type==='image/jpeg'?b.subarray(0,3).equals(Buffer.from('ffd8ff','hex')):b.toString('ascii',0,4)==='RIFF'&&b.toString('ascii',8,12)==='WEBP';if(!valid)return res.status(400).json({error:'Formato immagine non valido'});let ext={'image/png':'png','image/jpeg':'jpg','image/webp':'webp'}[type];let name=randomBytes(16).toString('hex')+'.'+ext;await mkdir(join(dir,'media'),{recursive:true,mode:0o700});await writeFile(join(dir,'media',name),b,{flag:'wx',mode:0o600});res.json({url:'/media/'+name});}catch(e){next(e)}});
+app.put('/api/admin/content',sameOrigin,auth,csrf,async(req,res,next)=>{if(writing)return res.status(409).json({error:'Salvataggio in corso, riprova.'});writing=true;try{let old=await db.read();if(req.body?.revision!==revision(old))return res.status(409).json({error:'I contenuti sono stati modificati da un’altra sessione. Ricarica prima di salvare.'});const updated=await db.write(req.body.data,req.body.revision);if(cloud && !updated)return res.status(409).json({error:'I contenuti sono stati modificati da un’altra sessione. Ricarica prima di salvare.'});res.json({revision:revision(req.body.data)});}catch(e){if(e instanceof SyntaxError || e.name==='ZodError' || e.message.startsWith('Campo') || e.message.startsWith('Oggetto') || e.message.startsWith('Elenco') || e.message.startsWith('Immagine') || e.message.startsWith('Struttura') || e.message.startsWith('Slug')) return res.status(400).json({error:'Contenuto non valido: '+e.message});next(e);}finally{writing=false;}});
+app.post('/api/admin/logout',sameOrigin,auth,csrf,async(req,res,next)=>{try { if(cloud) await db.deleteSession(cookieToken(req)); else sessions.delete(cookieToken(req));res.clearCookie('cms_session',{path:'/api/admin',httpOnly:true,sameSite:'strict',secure:production});res.json({ok:true});} catch(e) { next(e); }});
+app.post('/api/admin/upload',sameOrigin,auth,csrf,async(req,res,next)=>{try{const {data,type}=req.body || {}; if(typeof data!=='string'||!['image/png','image/jpeg','image/webp'].includes(type)||data.length>4_000_000 || !/^[A-Za-z0-9+/]*={0,2}$/.test(data))return res.status(400).json({error:'File non valido'});const b=Buffer.from(data,'base64');if(b.length>3_000_000 || b.length<16)return res.status(400).json({error:'La dimensione massima è 3 MB'});const valid=type==='image/png'?b.subarray(0,8).equals(Buffer.from('89504e470d0a1a0a','hex')):type==='image/jpeg'?b.subarray(0,3).equals(Buffer.from('ffd8ff','hex')):b.toString('ascii',0,4)==='RIFF'&&b.toString('ascii',8,12)==='WEBP';if(!valid)return res.status(400).json({error:'Formato immagine non valido'});let ext={'image/png':'png','image/jpeg':'jpg','image/webp':'webp'}[type];let name=randomBytes(16).toString('hex')+'.'+ext;if (cloud) { const blob=await put('media/'+name,b,{access:'public',contentType:type,addRandomSuffix:false}); return res.json({url:blob.url}); } await mkdir(join(dir,'media'),{recursive:true,mode:0o700});await writeFile(join(dir,'media',name),b,{flag:'wx',mode:0o600});res.json({url:'/media/'+name});}catch(e){next(e)}});
 app.use('/media',express.static(join(dir,'media'),{dotfiles:'deny',index:false,fallthrough:false}));
 if (production) {
   const { render } = await import('../.ssr/entry-server.js');
@@ -67,4 +72,5 @@ if (production) {
   } catch(e){next(e)} });
 }
 app.use((err,req,res,next)=>{console.error(err);res.status(err.status || 500).json({error:'Errore del server'});});
-const port=Number(process.env.PORT || 3001);app.listen(port,'0.0.0.0',()=>console.log(`CMS API in ascolto sulla porta ${port}; accesso ${configured?'configurato':'disabilitato (imposta CMS_USERNAME e password)'}`));
+if (!process.env.VERCEL) { const port=Number(process.env.PORT || 3001);app.listen(port,'0.0.0.0',()=>console.log(`CMS API in ascolto sulla porta ${port}; accesso ${configured?'configurato':'disabilitato (imposta CMS_USERNAME e password)'}`)); }
+export default app;

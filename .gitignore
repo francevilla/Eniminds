@@ -8,3 +8,6 @@ agent/skills/
 .env.*
 !.env.example
 .cms-data/
+
+vercel-dist/
+.vercel/
