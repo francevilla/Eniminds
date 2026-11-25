@@ -9,6 +9,14 @@
   },
   "rewrites": [
     {
+      "source": "/",
+      "destination": "/api/index?__cms_path=/"
+    },
+    {
+      "source": "/:path*/",
+      "destination": "/api/index?__cms_path=/:path*/"
+    },
+    {
       "source": "/:path*",
       "destination": "/api/index?__cms_path=/:path*"
     }

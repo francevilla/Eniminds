@@ -1,5 +1,7 @@
 # Test non commerciale: Vercel Hobby, Neon e Blob
 
+La correzione delle route `/` e con slash finale è stata verificata con una build Vercel locale; il deploy remoto resta da verificare. Non promuovere la preview finché non sono completati tutti i controlli.
+
 Questa configurazione è preparata per una **preview di test**, non è stata ancora collaudata su Vercel o su un account Neon/Blob reale. È indispensabile verificare il deploy e il suo comportamento prima dell'uso. Nessun servizio è stato attivato automaticamente. Il piano Hobby è consentito da Vercel solo per uso personale o non commerciale; consulta i [termini](https://vercel.com/legal/terms#4-hobby-plan).
 
 Il CMS è scritto in questo repository: Neon e Blob sono solo database e archiviazione, **non CMS**. Le sessioni e il limite dei tentativi sono condivisi nel database; l'aggiornamento dei contenuti usa una revisione atomica. Le immagini caricate sono pubbliche, anche prima della pubblicazione. Non caricare dati riservati; il controllo immagini è basato sulla firma e non è una bonifica completa del file. Limite: 3 MB per immagine, sotto il limite delle richieste Vercel dopo codifica base64. Non c'è MFA né audit di sicurezza indipendente.
